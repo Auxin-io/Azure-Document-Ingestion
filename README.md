@@ -215,26 +215,32 @@ bash run_all.sh
 | 2 | `document_pipeline.py upload` | Copies each dataset into the `raw` container under its own prefix |
 | 3 | `document_pipeline.py extract` | OCRs every file with Document Intelligence `prebuilt-read`, writes text + metadata to `curated`. Idempotent — skips what is already done |
 | 4 | `build_dataset.py --all` | Open-book JSONL per dataset: OCR text + label |
-| 5 | `build_closed_book.py --dataset finance --upload` | **Closed-book JSONL for finance**: question → answer, no document text. `--upload` also writes it to `curated/datasets/` so Azure ML reads it from Blob |
+| 5 | `build_closed_book.py --dataset finance --upload` | **Closed-book JSONL for finance** (Track A): question → answer, no document text. `--upload` also writes it to `curated/datasets/` so Azure ML reads it from Blob |
+| 6 | `build_closed_book.py --dataset employee --upload` | **Closed-book JSONL for employee** (Track B), the same way |
 
 Every script answers `--help` without an Azure login or the SDK installed.
 
 Tune with environment variables: `COUNT=10 WORKERS=8 DATASETS="finance hr"`.
 
-### If you are running Track B, build the employee set too
+### What `--upload` does, and why it matters
 
-`run_all.sh` builds the **finance** closed-book data only. Track B's data assets point at
-`closed_book_employee/`, which is never created unless you ask for it:
+`run_all.sh` builds **both** closed-book datasets - finance for Track A and
+employee for Track B - and uploads both. You do not have to run anything
+extra.
+
+`--upload` is the part that matters: it writes the JSONL into
+`curated/datasets/` in Blob Storage, which is where Azure ML reads it from.
+Build without `--upload` and the files exist only on your laptop, where the
+training job cannot see them.
+
+To rebuild one dataset on its own:
 
 ```bash
+python build_closed_book.py --dataset finance  --upload
 python build_closed_book.py --dataset employee --upload
 ```
 
-`--upload` is the part that matters: it writes the JSONL into `curated/datasets/` in Blob
-Storage, which is where Azure ML reads it from. Without `--upload` the files exist only on your
-laptop and the training job cannot see them.
-
-Track C needs no extra command — it uses the OCR text `run_all.sh` already produced.
+Track C needs neither - it reads the OCR text `run_all.sh` already produced.
 
 ### Check it worked
 
@@ -330,7 +336,7 @@ generate_pdfs.py        three datasets of PDFs + ground truth with structured fa
 document_pipeline.py    upload to Blob, OCR with Document Intelligence
 build_dataset.py        open-book JSONL per dataset
 build_closed_book.py    closed-book Q&A for one dataset (finance, employee or hr)
-run_all.sh              all of it, in order - finance closed-book only
+run_all.sh              all of it, in order - both closed-book datasets included
 terraform/              resource group, storage account, containers, Document Intelligence, roles
 requirements.txt        azure-identity, azure-storage-blob, azure-ai-documentintelligence, reportlab
 data/                   generated, gitignored - regenerates identically from the seed
@@ -515,7 +521,7 @@ collision.
 | Quota error creating the GPU cluster | Machine Learning quota for `NCASv3_T4`, not VM quota. Check with `az ml compute list-usage`, not the VM quota page. |
 | `scope was not found`, or a mangled `C:/Program Files/...` path in the error | Git Bash rewrote an ARM resource ID. Prefix the command with `MSYS_NO_PATHCONV=1`. |
 | Training job fails reading the data | Usually `--upload` was skipped, so the JSONL never reached Blob. The Blob read role is granted by the track's Terraform, so check the apply succeeded. |
-| Track B cannot find its data assets | `run_all.sh` does not build the employee set. Run `build_closed_book.py --dataset employee --upload`. |
+| Track B cannot find its data assets | The employee JSONL never reached Blob. Re-run `build_closed_book.py --dataset employee --upload` and check `curated/datasets/closed_book_employee/`. |
 | Agent replies but never calls its tool | The Foundry project's managed identity has no `AzureML Data Scientist` on the endpoint, or the grant has not propagated — wait 5–10 minutes. |
 | `create_agent.py` cannot find the project | You did not load the stack's outputs. Run `eval "$(terraform -chdir=terraform output -raw agent_env)"` in that repo. |
 | `fetch_documents.py` exits saying `AZURE_STORAGE_ACCOUNT is not set` | Load the RAG stack's outputs, or export this repo's `terraform output storage_account` yourself. |
