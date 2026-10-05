@@ -1,5 +1,9 @@
 # Document Ingestion on Azure — PDFs to training data
 
+> **New here?** [START-HERE.md](START-HERE.md) covers the whole build — how this repo feeds the
+> three model repos, what order to run them in, prerequisites, cost and teardown. Read it first.
+> **Every one of the three tracks depends on this repo**: it is the only thing that produces the data.
+
 Generates three small business-document datasets, OCRs them with Azure AI
 Document Intelligence, and produces the training data for the fine-tuned model.
 
