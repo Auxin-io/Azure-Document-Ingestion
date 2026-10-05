@@ -23,7 +23,7 @@ Everything is synthetic and reproducible. You can run one track or all three.
 | Repository | What it does | Required? |
 |---|---|---|
 | **Azure-Document-Ingestion** (this repo) | Generates 30 PDFs, OCRs them, produces the training data | **Yes — always first** |
-| [Azure-FineTuning-Foundry-Agent](https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent) | Fine-tunes Qwen2.5-3B with QLoRA, serves it, wraps it in an agent | **Yes — it also builds the shared foundation** |
+| [Azure-FineTuning-Foundry-Agent](https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent) | Fine-tunes Qwen2.5-3B with QLoRA, serves it, wraps it in an agent | Optional track |
 | [Azure-Employee-Pretraining](https://github.com/Auxin-io/Azure-Employee-Pretraining) | Trains a 3.2M-parameter model from scratch, random weights up | Optional track |
 | [Azure-HR-RAG](https://github.com/Auxin-io/Azure-HR-RAG) | Retrieval over an index, no training at all | Optional track |
 
@@ -33,38 +33,31 @@ Everything is synthetic and reproducible. You can run one track or all three.
 flowchart TD
     ING["<b>Azure-Document-Ingestion</b><br/>PDFs → OCR → JSONL + text<br/>finance / employee / hr"]
 
-    FOUND["<b>Shared foundation</b><br/>(lives in the fine-tuning repo)<br/>ML workspace · AI Services · chat model<br/>Foundry project · GPU cluster · datastore"]
-
     FT["<b>Track A — Fine-tune</b><br/>finance closed-book JSONL<br/>knowledge in adapter weights"]
     PT["<b>Track B — From scratch</b><br/>employee closed-book JSONL<br/>knowledge in the weights"]
     RAG["<b>Track C — RAG</b><br/>hr OCR text<br/>knowledge in an index"]
 
-    ING --> FOUND
-    FOUND --> FT
-    FOUND --> PT
-    FOUND --> RAG
-    ING -. "finance/*.jsonl" .-> FT
-    ING -. "employee/*.jsonl" .-> PT
-    ING -. "hr/*.txt" .-> RAG
+    ING -->|"finance/*.jsonl"| FT
+    ING -->|"employee/*.jsonl"| PT
+    ING -->|"hr/*.txt"| RAG
 ```
 
-Two things about this are easy to miss and will cost you an afternoon if you do:
+One thing about this is easy to miss: **ingestion is not optional for any track.** It is the
+only thing that produces the data — no OCR output, nothing to train on or index.
 
-1. **Ingestion is not optional for any track.** It is the only thing that produces the data.
-   No OCR output, nothing to train on or index.
-2. **The fine-tuning repo is also the shared foundation.** Its Terraform creates the resource
-   group, the ML workspace, the AI Services account, the chat-model deployment and the GPU
-   cluster that the other two tracks assume already exist. Even if you only want RAG, you run
-   its Step 1 and its Foundry-project step.
+Otherwise the three tracks are **independent**. Each has its own `terraform/` that creates its
+own resource group, its own AI Services account and its own Foundry project, so there is no
+shared infrastructure to stand up first and no order between them. The only input each one takes
+from here is the name of this repo's storage account. Part 3 has the details.
 
 ## Pick your path
 
 | I want to… | Run | GPU quota needed? | Rough time |
 |---|---|---|---|
-| See the whole comparison | This repo → Foundation → A, B, C | Yes | a day, mostly waiting |
-| Fine-tune a real model | This repo → Foundation → **A** | Yes | ~4 h (3 h is training) |
-| Train a model from scratch | This repo → Foundation → **B** | Yes | ~1 h (77 s is training) |
-| Do RAG only, cheapest path | This repo → Foundation → **C** | **No** — set `enable_gpu_cluster = false` | ~45 min |
+| See the whole comparison | This repo → A, B, C | Yes, for A and B | a day, mostly waiting |
+| Fine-tune a real model | This repo → **A** | Yes | ~4 h (3 h is training) |
+| Train a model from scratch | This repo → **B** | Not strictly — a CPU SKU works | ~1 h (77 s is training) |
+| Do RAG only, cheapest path | This repo → **C** | **No** — that stack has no compute at all | ~45 min |
 | Just see the OCR pipeline | This repo only | No | ~20 min |
 
 The RAG-only path is the one to start with if you are evaluating this. It needs no GPU quota,
@@ -130,18 +123,17 @@ location    = "eastus"
 Globally-unique names get a random suffix appended automatically, so two people can run this in
 the same subscription without colliding.
 
-**One caveat you have to handle manually.** The three `create_agent.py` scripts hardcode the
-resource group, the Foundry project name and the agent name near the top of the file — they do
-not read `name_prefix`. If you change the prefix, edit these constants before running them:
+**No script hardcodes a resource name.** Each track's Terraform emits an `agent_env` output
+holding every name its scripts need, so after `terraform apply` you run:
 
-| File | Line | Constants to change |
-|---|---|---|
-| `Azure-FineTuning-Foundry-Agent/agent/create_agent.py` | ~30 | `RG`, `ENDPOINT`, `PROJECT`, `AGENT_NAME` |
-| `Azure-Employee-Pretraining/foundry/create_agent.py` | ~30 | `RG`, `ENDPOINT`, `PROJECT`, `AGENT_NAME` |
-| `Azure-HR-RAG/rag/create_agent.py` | ~29 | `RG`, `PROJECT`, `AGENT_NAME`, `STORE_NAME` |
+```bash
+eval "$(terraform -chdir=terraform output -raw agent_env)"
+```
 
-`Azure-HR-RAG/rag/fetch_documents.py` is the exception — it reads `AZURE_STORAGE_ACCOUNT` from
-the environment, so export that instead of editing it.
+and then the Python scripts work against whatever you named things. The one value with no usable
+default is `AZURE_STORAGE_ACCOUNT` for `Azure-HR-RAG/rag/fetch_documents.py`: the ingestion
+storage account name carries a random suffix, so the script refuses to guess and tells you to
+load the outputs.
 
 Throughout, `<angle-bracket>` values are things you choose or read back from `terraform output`.
 
@@ -353,113 +345,100 @@ generalisation score.
 
 # Part 3 — After this repo
 
-## The shared foundation
+Each of the three tracks is **self-contained**. Each repo has its own `terraform/` that creates
+its own resource group and everything that track needs — there is no shared foundation to deploy
+first, and no order between them. Run one, two or all three, in any order.
 
-**Every path needs this**, including RAG-only. It lives in
-[Azure-FineTuning-Foundry-Agent](https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent) —
-this is what the other repos' READMEs call "Steps 1 and 5 of the fine-tuning repo".
+The only thing they need from here is the storage account this repo created, passed in as two
+variables:
+
+```hcl
+# terraform.tfvars in the track repo
+name_prefix                 = "yourprefix"
+ingest_storage_account_name = "<terraform output storage_account, from this repo>"
+ingest_resource_group_name  = "<terraform output resource_group,  from this repo>"
+```
+
+No remote state, no data source into another track, no manual role grants. Each stack looks the
+ingestion account up by name and grants its own identities read access to it.
+
+## What each track's Terraform creates
+
+| | A — Fine-tune | B — Pretrain | C — RAG |
+|---|---|---|---|
+| Resource group | `<prefix>-finetune-rg` | `<prefix>-pretrain-rg` | `<prefix>-rag-rg` |
+| ML workspace + storage, Key Vault, App Insights, Log Analytics | yes | yes | **no** |
+| Container Registry | yes | yes | no |
+| Training cluster (min 0 / max 1) | GPU T4 + CPU | one, size is a variable | no |
+| AI Services + `gpt-4.1-mini` | yes | yes | yes |
+| `text-embedding-3-small` | no | no | **yes** — the vector store needs it |
+| Foundry project | yes | yes | yes |
+| Credential-less datastore → `curated` | yes | yes | no |
+| Blob read on this repo's storage | workspace + clusters + you | workspace + cluster + you | you |
+| Least-privilege endpoint-scorer role for the project | yes | yes | n/a |
+
+RAG's stack is six resources and three role assignments. It needs **no GPU quota and no
+workspace**, and nothing in it bills by the hour.
+
+## Deploying a track
 
 ```bash
-git clone https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent
+git clone https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent    # or the other two
 cd Azure-FineTuning-Foundry-Agent/terraform
 
 terraform init
-terraform apply          # your own name_prefix; enable_gpu_cluster = false if RAG-only
+terraform apply          # name_prefix + the two ingest_* variables
 terraform output
 ```
 
-That creates, in one resource group: an Azure ML workspace with its storage account, Key Vault,
-App Insights and Log Analytics; a Container Registry; a GPU compute cluster at min 0 / max 1; an
-AI Services account with a `gpt-4.1-mini` deployment; and your own data-plane role assignments.
-
-Note the outputs — you will paste them into later commands:
+Then load the names the scripts need — no script hardcodes a resource name any more:
 
 ```bash
-terraform output ml_workspace          # -> <workspace>
-terraform output ai_services_account   # -> <ai-services>
-terraform output container_registry    # -> <acr>
-terraform output subscription_id       # -> <sub>
-terraform output resource_group        # -> <ml-rg>
+eval "$(terraform -chdir=terraform output -raw agent_env)"
 ```
 
-### Attach the registry to the workspace
-
-Done outside Terraform on purpose — doing it in Terraform forces the workspace to be replaced on
-later applies.
+**Tracks A and B have one step Terraform cannot do**: attaching the Container Registry to the ML
+workspace. Setting `container_registry_id` in Terraform forces the workspace to be *replaced* on
+every later apply, destroying compute and jobs with it, so it is applied in place instead. Both
+stacks print the exact command with your names already in it:
 
 ```bash
-MSYS_NO_PATHCONV=1 az ml workspace update -n <workspace> -g <ml-rg> \
-  --container-registry "/subscriptions/<sub>/resourceGroups/<ml-rg>/providers/Microsoft.ContainerRegistry/registries/<acr>" \
-  --update-dependent-resources
+eval "$(terraform -chdir=terraform output -raw attach_registry_command)"   # pretrain
 ```
 
-### Confirm the workspace can actually see GPU quota
+Confirm the workspace can see GPU quota before you train (A and B only):
 
 ```bash
 az ml compute list-usage -g <ml-rg> -w <workspace> -l <region> -o table
 ```
 
 `Standard NCASv3_T4 Family` must be >= 4. If it reads 0 here, your quota request has not landed
-yet, whatever the portal says.
+yet, whatever the portal says. Track B can run without GPU quota at all — set `training_vm_size`
+to a CPU SKU and the cluster name stays the same, so `training/job.yml` needs no edit. The
+77-second job becomes roughly 40 minutes.
 
-### Create the Foundry project
-
-Terraform cannot create this yet, so one REST call does. Pick your own project name:
-
-```bash
-AIS=/subscriptions/<sub>/resourceGroups/<ml-rg>/providers/Microsoft.CognitiveServices/accounts/<ai-services>
-
-az rest --method put \
-  --url "https://management.azure.com$AIS/projects/<project>?api-version=2025-04-01-preview" \
-  --body '{"location":"<region>","identity":{"type":"SystemAssigned"},"properties":{}}'
-```
-
-The project gets a system-assigned managed identity. That identity — not you, and not a key — is
-what calls the model endpoints later. Remember `<project>`; all three agent scripts need it.
-
-### Link this repo's data into the workspace
-
-**Tracks A and B both need this, and it is easy to miss if you skip Track A.** The datastore
-definition lives only in the fine-tuning repo, but the employee track's data assets point at it
-too.
-
-First let the workspace and the GPU cluster read this repo's storage account. Shared keys are
-disabled, so this role grant is the only way in:
-
-```bash
-STG=$(az storage account show -n <ingest-storage> -g <ingest-rg> --query id -o tsv)
-for ID in $(az ml compute show   -n <gpu-cluster> -g <ml-rg> -w <workspace> --query identity.principal_id -o tsv) \
-          $(az ml workspace show -n <workspace>   -g <ml-rg>                --query identity.principal_id -o tsv); do
-  MSYS_NO_PATHCONV=1 az role assignment create --assignee-object-id $ID \
-    --assignee-principal-type ServicePrincipal --role "Storage Blob Data Reader" --scope $STG
-done
-```
-
-Then register the container as a credential-less datastore. Nothing is copied — the workspace
-reads the Blob container in place:
-
-```bash
-cd ../data
-az ml datastore create -f datastore.yml -g <ml-rg> -w <workspace> --set account_name=<ingest-storage>
-```
-
-Skip this only if you are doing RAG-only — Track C reads Blob directly and never touches the
-workspace.
+**Deploying A and B together uses two GPU cores each, 8 of the 12 you requested**, and duplicates
+a workspace, registry, Key Vault and Log Analytics — about $5–10/month extra at idle, and a
+second ~10-minute image build the first time each one trains. That is the price of the three
+tracks being independent.
 
 ## The three tracks
 
-Each is independent. Run one, two or all three. Full steps are in each repo's README.
+Each is independent. Full steps are in each repo's README.
 
 | Track | Repo | Needs from here | What to watch for |
 |---|---|---|---|
-| **A — Fine-tune** | [Azure-FineTuning-Foundry-Agent](https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent) | `closed_book_finance/` + datastore | ~3 h on a T4. Knowledge ends up in adapter weights; the model answers with no document in the prompt. |
-| **B — From scratch** | [Azure-Employee-Pretraining](https://github.com/Auxin-io/Azure-Employee-Pretraining) | `closed_book_employee/` + datastore | 77 s of training. `validation exact match=1.000` but `test≈0.74` — it memorised its ten documents and generalises poorly. Ask it about someone who does not exist. |
-| **C — RAG** | [Azure-HR-RAG](https://github.com/Auxin-io/Azure-HR-RAG) | the `hr` OCR text only | No GPU, no endpoint, no training. Answers carry a filename citation, and questions outside the documents are refused. |
+| **A — Fine-tune** | [Azure-FineTuning-Foundry-Agent](https://github.com/Auxin-io/Azure-FineTuning-Foundry-Agent) | `closed_book_finance/` | ~3 h on a T4. Knowledge ends up in adapter weights; the model answers with no document in the prompt. |
+| **B — From scratch** | [Azure-Employee-Pretraining](https://github.com/Auxin-io/Azure-Employee-Pretraining) | `closed_book_employee/` | 77 s of training. `validation exact match=1.000` but `test≈0.74` — it memorised its ten documents and generalises poorly. Ask it about someone who does not exist. |
+| **C — RAG** | [Azure-HR-RAG](https://github.com/Auxin-io/Azure-HR-RAG) | the `hr` OCR text | No GPU, no endpoint, no training. Answers carry a filename citation, and questions outside the documents are refused. |
 
 Tracks A and B each deploy a **managed online endpoint**, and that is the only thing in this
 whole build that costs real money. Track C deploys nothing.
 
----
+Because each track owns its own Foundry project, the three agents live in three projects. They
+are fully isolated — deleting one track touches nothing else — but a single supervisor agent
+calling all three as tools is not something these repos deploy.
+
 
 # Cost
 
@@ -510,16 +489,18 @@ az ml online-endpoint delete -n <employee-endpoint> -g <ml-rg> -w <workspace> --
 
 # 2. Agents and vector store (see each repo's teardown snippet)
 
-# 3. Everything else
-terraform destroy      # in the fine-tuning repo
+# 3. Everything else - one destroy per track you deployed, then this repo last
+terraform destroy      # in each track repo
 terraform destroy      # in this repo
 ```
 
-Deleting an endpoint takes about five minutes and takes its deployment with it.
+Deleting an endpoint takes about five minutes and takes its deployment with it. Destroy the
+track stacks **before** this one: each of them holds a role assignment and a datastore pointing
+at this repo's storage account.
 
-Two things `terraform destroy` will not remove, because Terraform never created them: the
-**Foundry project** (delete it with `az rest --method delete` on the same URL you created it
-with) and any **Azure Bot Service** that the optional Copilot publishing step created.
+The **Foundry project is now Terraform-managed**, so `terraform destroy` removes it with the
+rest. The one thing it will not remove is an **Azure Bot Service** created by the optional
+Copilot publishing step, because Terraform never created it.
 
 **If you deleted resource groups by hand instead**, your local `terraform.tfstate` still
 describes resources that no longer exist, and it will try to reuse the same random suffix —
@@ -533,11 +514,11 @@ collision.
 |---|---|
 | Quota error creating the GPU cluster | Machine Learning quota for `NCASv3_T4`, not VM quota. Check with `az ml compute list-usage`, not the VM quota page. |
 | `scope was not found`, or a mangled `C:/Program Files/...` path in the error | Git Bash rewrote an ARM resource ID. Prefix the command with `MSYS_NO_PATHCONV=1`. |
-| Training job fails reading the data | The compute cluster's identity is missing `Storage Blob Data Reader` on this repo's storage account, or you skipped `--upload`. |
+| Training job fails reading the data | Usually `--upload` was skipped, so the JSONL never reached Blob. The Blob read role is granted by the track's Terraform, so check the apply succeeded. |
 | Track B cannot find its data assets | `run_all.sh` does not build the employee set. Run `build_closed_book.py --dataset employee --upload`. |
 | Agent replies but never calls its tool | The Foundry project's managed identity has no `AzureML Data Scientist` on the endpoint, or the grant has not propagated — wait 5–10 minutes. |
-| `create_agent.py` cannot find the project | It hardcodes `RG` and `PROJECT`. Edit the constants at the top of the file to match your names. |
-| `fetch_documents.py` cannot reach the storage account | It defaults to a name from the original build. `export AZURE_STORAGE_ACCOUNT=<your storage account>`. |
+| `create_agent.py` cannot find the project | You did not load the stack's outputs. Run `eval "$(terraform -chdir=terraform output -raw agent_env)"` in that repo. |
+| `fetch_documents.py` exits saying `AZURE_STORAGE_ACCOUNT is not set` | Load the RAG stack's outputs, or export this repo's `terraform output storage_account` yourself. |
 | Document Intelligence creation fails | Either the region does not offer it, or you asked for F0 and already have one — only one F0 per subscription. |
 | Agent output crashes on Windows | Set `PYTHONIOENCODING=utf-8`. |
 | First training job sits in `Preparing` for ~10 minutes | Normal — the container image is building in the registry. Later runs reuse it. |
