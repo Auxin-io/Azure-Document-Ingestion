@@ -171,6 +171,7 @@ az login
 cd terraform
 terraform init
 terraform apply          # with your own name_prefix in terraform.tfvars
+cd ..
 ```
 
 | Resource | Name | Used for |
@@ -205,7 +206,10 @@ Keep `storage_account` to hand — every other repo needs it.
 ## Step 2 — run the ingestion
 
 ```bash
+python3 -m venv .venv
+chmod +x .venv/bin/activate
 pip install -r requirements.txt
+chmox +x run_all.sh
 bash run_all.sh
 ```
 
