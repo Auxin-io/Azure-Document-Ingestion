@@ -107,8 +107,9 @@ Keep `storage_account` to hand — every other repo needs it.
 ```bash
 python3 -m venv .venv
 chmod +x .venv/bin/activate
+source .venv/bin/activate
 pip install -r requirements.txt
-chmox +x run_all.sh
+chmod +x run_all.sh
 bash run_all.sh
 ```
 
