@@ -205,5 +205,4 @@ data/                   generated, gitignored - regenerates identically from the
 
 Known limits: PII screening in `extract` is regex and over-flags (it tags, it does not block).
 The corpus is synthetic — reproducible and leakage-free, but not real business data. Ten
-documents per dataset is enough to demonstrate closed-book recall, not to claim a
-generalisation score.
+documents per dataset is enough to demonstrate closed-book recall.
