@@ -25,9 +25,9 @@ Intelligence, and produces the training data the other repos consume.
 flowchart TD
     ING["<b>Azure-Document-Ingestion</b><br/>PDFs → OCR → JSONL + text<br/>finance / employee / hr"]
 
-    FT["<b>Track A — Fine-tune</b><br/>finance closed-book JSONL<br/>knowledge in adapter weights"]
-    PT["<b>Track B — From scratch</b><br/>employee closed-book JSONL<br/>knowledge in the weights"]
-    RAG["<b>Track C — RAG</b><br/>hr OCR text<br/>knowledge in an index"]
+    FT["<b>Fine-tune</b><br/>finance closed-book JSONL<br/>knowledge in adapter weights"]
+    PT["<b>From scratch</b><br/>employee closed-book JSONL<br/>knowledge in the weights"]
+    RAG["<b>RAG</b><br/>hr OCR text<br/>knowledge in an index"]
 
     ING -->|"finance/*.jsonl"| FT
     ING -->|"employee/*.jsonl"| PT
